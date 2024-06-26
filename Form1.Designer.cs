@@ -117,7 +117,7 @@
             btn_OpenCamara.TabIndex = 7;
             btn_OpenCamara.Text = "Abrir Cámara";
             btn_OpenCamara.UseVisualStyleBackColor = false;
-            btn_OpenCamara.Click += btn_OpenCamara_Click;
+            btn_OpenCamara.Click += Btn_OpenCamara_Click;
             // 
             // btn_stop
             // 
@@ -130,7 +130,7 @@
             btn_stop.TabIndex = 8;
             btn_stop.Text = "Paro";
             btn_stop.UseVisualStyleBackColor = false;
-            btn_stop.Click += btn_stop_Click;
+            btn_stop.Click += Btn_stop_Click;
             // 
             // Form1
             // 

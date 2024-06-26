@@ -19,6 +19,7 @@ namespace Analitico2_Elementia
     public partial class Form1 : Form
     {
         private Mat ImagenOriginal;
+        private readonly Mat camara = new();
         private VideoCapture videoCapture;
         readonly VideoCapture streamVideo;
 
@@ -29,7 +30,7 @@ namespace Analitico2_Elementia
             new(2688, 744)
         ];
 
-        private ActivationNetwork perceptron;
+        private readonly ActivationNetwork perceptron;
         public double[][] inputs;
         public double[][] targets;
 
@@ -48,15 +49,21 @@ namespace Analitico2_Elementia
         readonly string folderPathPpal = @"C:\Ditran";
 
         //variable para guardar imagen
-        public int k = 0 , j = 0;
+        public int k = 0, j = 0;
 
         public Form1()
         {
             InitializeComponent();
-            InitializePerceptron();
+
+            int inputSize = 90 * 90; // Tamaño de la imagen binarizada
+            int hiddenSize = 5;    // Puede ajustarse según sea necesario
+            int outputSize = 2;      // Número de clases a clasificar
+
+            perceptron = new ActivationNetwork(new SigmoidFunction(), inputSize, hiddenSize, outputSize);
+
             InitializeTimer();
             InitializeTimer2();
-                     
+
             streamVideo = new VideoCapture($"rtsp://{username}:{password}@{ip}/{endpoint}");
 
             ImagenOriginal = new Mat();
@@ -82,12 +89,10 @@ namespace Analitico2_Elementia
                 _ = teacher.RunEpoch(inputs, targets);
             }
 
-
             // verificar si existe la carpeta para almacenar la imagen
             if (!Directory.Exists(folderPath))
             {
                 Directory.CreateDirectory(folderPath);
-
             }
 
             pictureBox1.BackColor = Color.Black;
@@ -95,14 +100,14 @@ namespace Analitico2_Elementia
         }
 
 
-        private void InitializePerceptron()
+        /*private void InitializePerceptron()
         {
             int inputSize = 90 * 90; // Tamaño de la imagen binarizada
             int hiddenSize = 10;    // Puede ajustarse según sea necesario
             int outputSize = 2;      // Número de clases a clasificar
 
             perceptron = new ActivationNetwork(new SigmoidFunction(), inputSize, hiddenSize, outputSize);
-        }
+        }*/
         private void InitializeTimer()
         {
             // Configuración del Timer
@@ -117,6 +122,7 @@ namespace Analitico2_Elementia
             timer2.Tick += Timer2_Tick;
 
         }
+
         private void Analisis(Mat imagenAnalisis)
         {
             using Mat recorImage = new();
@@ -211,12 +217,12 @@ namespace Analitico2_Elementia
             }
 
             // Agrupar contornos alineados
-            List<List<Rectangle>> groupedContours = GroupVerticallyAlignedContours([.. positiveBoundingBoxes], 0.1, 15);
+            List<List<Rectangle>> groupedContours = GroupVerticallyAlignedContours([.. positiveBoundingBoxes], 0.1, 17);
 
             // Dibujar los contornos agrupados
             Parallel.ForEach(groupedContours, group =>
             {
-                if (group.Count >= 15)
+                if (group.Count >= 10)
                 {
                     Rectangle combinedBoundingBox = CombineBoundingBoxes(group);
 
@@ -263,16 +269,16 @@ namespace Analitico2_Elementia
             pictureBox.Image = bitmap.Clone() as Image;  // Clonar el bitmap para evitar problemas de acceso a recursos
         }
 
-        public void CargarImagenes(double[][] inputs, double[][] targets, string[] positiveImagesPaths, string[] negativeImagesPaths)
+        public static void CargarImagenes(double[][] inputs, double[][] targets, string[] positiveImagesPaths, string[] negativeImagesPaths)
         {
             // Etiquetas para imágenes positivas y negativas
-            double[] positiveLabel = { 0, 1 }; // [0, 1]
-            double[] negativeLabel = { 1, 0 }; // [1, 0]
+            double[] positiveLabel = [0, 1]; // [0, 1]
+            double[] negativeLabel = [1, 0]; // [1, 0]
 
             // Cargar imágenes positivas
             Parallel.For(0, positiveImagesPaths.Length, i =>
             {
-                Bitmap bitmap = new Bitmap(positiveImagesPaths[i]);
+                Bitmap bitmap = new(positiveImagesPaths[i]);
                 inputs[i] = ConvertImageToDoubleArray(bitmap);
                 targets[i] = positiveLabel;
             });
@@ -280,7 +286,7 @@ namespace Analitico2_Elementia
             // Cargar imágenes negativas
             Parallel.For(0, negativeImagesPaths.Length, i =>
             {
-                Bitmap bitmap = new Bitmap(negativeImagesPaths[i]);
+                Bitmap bitmap = new(negativeImagesPaths[i]);
                 inputs[i + positiveImagesPaths.Length] = ConvertImageToDoubleArray(bitmap);
                 targets[i + positiveImagesPaths.Length] = negativeLabel;
             });
@@ -302,36 +308,28 @@ namespace Analitico2_Elementia
             return result;
         }
 
-        private List<List<Rectangle>> GroupVerticallyAlignedContours(List<Rectangle> boundingBoxes, double similarityThreshold, int minGroupSize)
+        private List<List<Rectangle>> GroupVerticallyAlignedContours(List<Rectangle> boundingBoxes, double tolerance, int minCount)
         {
             List<List<Rectangle>> groups = new List<List<Rectangle>>();
 
-            // Crear un diccionario para almacenar los grupos
-            ConcurrentDictionary<int, List<Rectangle>> groupDict = new ConcurrentDictionary<int, List<Rectangle>>();
-
-            // Agrupar rectángulos
-            Parallel.For(0, boundingBoxes.Count, i =>
+            for (int i = 0; i < boundingBoxes.Count; i++)
             {
                 Rectangle rect1 = boundingBoxes[i];
+                List<Rectangle> group = new List<Rectangle> { rect1 };
+
                 for (int j = i + 1; j < boundingBoxes.Count; j++)
                 {
                     Rectangle rect2 = boundingBoxes[j];
 
-                    if (AreVerticallyAligned(rect1, rect2, similarityThreshold))
+                    // Verifica si los contornos están alineados verticalmente dentro de un margen del 2%
+                    if (Math.Abs(rect1.X - rect2.X) <= rect1.Width * tolerance)
                     {
-                        if (!groupDict.ContainsKey(i))
-                        {
-                            groupDict[i] = new List<Rectangle>();
-                        }
-                        groupDict[i].Add(rect2);
+                        group.Add(rect2);
                     }
                 }
-            });
 
-            // Convertir el diccionario en una lista de grupos
-            foreach (var group in groupDict.Values)
-            {
-                if (group.Count >= minGroupSize)
+                // Solo añadir el grupo si tiene al menos minCount contornos
+                if (group.Count >= minCount)
                 {
                     groups.Add(group);
                 }
@@ -339,54 +337,45 @@ namespace Analitico2_Elementia
 
             return groups;
         }
-        private bool AreVerticallyAligned(Rectangle rect1, Rectangle rect2, double similarityThreshold)
-        {
-            double yOverlap = Math.Max(0, Math.Min(rect1.Bottom, rect2.Bottom) - Math.Max(rect1.Top, rect2.Top));
-            double y1Size = rect1.Height;
-            double y2Size = rect2.Height;
 
-            return (yOverlap / Math.Min(y1Size, y2Size)) > similarityThreshold;
+        private Rectangle CombineBoundingBoxes(List<Rectangle> boundingBoxes)
+        {
+            int x = boundingBoxes.Min(r => r.X);
+            int y = boundingBoxes.Min(r => r.Y);
+            int width = boundingBoxes.Max(r => r.Right) - x;
+            int height = boundingBoxes.Max(r => r.Bottom) - y;
+
+            return new Rectangle(x, y, width, height);
         }
 
-
-        private static Rectangle CombineBoundingBoxes(List<Rectangle> boundingBoxes)
+        private async void Btn_anaVideo_Click(object sender, EventArgs e)
         {
-            int x1 = boundingBoxes.Min(rect => rect.Left);
-            int y1 = boundingBoxes.Min(rect => rect.Top);
-            int x2 = boundingBoxes.Max(rect => rect.Right);
-            int y2 = boundingBoxes.Max(rect => rect.Bottom);
-
-            return Rectangle.FromLTRB(x1, y1, x2, y2);
-        }
-
-        private void Btn_anaVideo_Click(object sender, EventArgs e)
-        {
-            Mat camara = new();
-
+            Pause = true;
             if (streamVideo == null)
             {
                 return;
             }
 
-            streamVideo.Read(camara);
-            timer1.Enabled = false;
-            timer2.Enabled = true;
-
-            analisis = true;
-
-
-            if (!camara.IsEmpty)
+            try
             {
-                timer2.Interval = 500;
-                timer2.Start();
+                while (Pause)
+                {
+                    streamVideo.Read(camara);
+                    DisplayImage(camara, pictureBox1);
+                    string imagePath = Path.Combine(folderPathPpal, $"{k}.jpg");
+                    k++;
+                    CvInvoke.Imwrite(imagePath, camara);
+                    Analisis(camara);
 
+                    double fps = streamVideo.Get(Emgu.CV.CvEnum.CapProp.Fps);
+                    await Task.Delay(1000 / Convert.ToInt32(fps));
+                }
             }
+            catch (Exception ex)
+            {
 
-            string image_path = Path.Combine(folderPathPpal, $"{k}.jpg");
-            CvInvoke.Imwrite(image_path, camara);
-            k++;
-
-
+                MessageBox.Show("Error al reproducir video: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
         }
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
@@ -425,7 +414,7 @@ namespace Analitico2_Elementia
             }
         }
 
-        private void Timer1_Tick(object sender, EventArgs e)
+        private void Timer1_Tick(object? sender, EventArgs e)
         {
             Mat video = new();
 
@@ -446,8 +435,8 @@ namespace Analitico2_Elementia
             }
         }
 
-        public bool analisis = false;
-        private void Timer2_Tick(object sender, EventArgs e)
+        public bool Pause = false;
+        private void Timer2_Tick(object? sender, EventArgs e)
         {
             try
             {
@@ -458,46 +447,54 @@ namespace Analitico2_Elementia
                 k++;
                 CvInvoke.Imwrite(imagePath, ImagenOriginal);
 
-                if (analisis == true)
-                    Analisis(ImagenOriginal);
+
+                Analisis(ImagenOriginal);
 
             }
             catch (Exception ex)
             {
-                MessageBox.Show(ex.Message);            
+                MessageBox.Show(ex.Message);
             }
 
         }
 
-        private void btn_OpenCamara_Click(object sender, EventArgs e)
+        private async void Btn_OpenCamara_Click(object sender, EventArgs e)
         {
-            Mat camara = new();
-
+            Pause = true;
             if (streamVideo == null)
             {
                 return;
             }
 
-            streamVideo.Read(camara);
-            timer1.Enabled = false;
-            timer2.Enabled = true;
-
-            analisis = false;
-
-            if (!camara.IsEmpty)
+            try
             {
-                timer2.Interval = 333;
-                timer2.Start();
+                while (Pause)
+                {
+                    streamVideo.Read(camara);
+                    DisplayImage(camara, pictureBox1);
+                    double fps = streamVideo.Get(Emgu.CV.CvEnum.CapProp.Fps);
+                    await Task.Delay(1000 / Convert.ToInt32(fps));
+                }
             }
+            catch (Exception ex)
+            {
+
+                MessageBox.Show("Error al reproducir video: " + ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
         }
 
-        private void btn_stop_Click(object sender, EventArgs e)
+        private void Btn_stop_Click(object sender, EventArgs e)
         {
+            Pause = false;
+
             timer2.Stop();
+            timer1.Stop();
             streamVideo.Pause();
             pictureBox1.Image = null;
             pictureBox2.Image = null;
         }
+
     }
 
 }
